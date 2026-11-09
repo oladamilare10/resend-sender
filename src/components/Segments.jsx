@@ -3,7 +3,6 @@ import axios from 'axios'
 
 export default function Segments() {
   const [segments, setSegments] = useState([])
-  const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
@@ -11,6 +10,8 @@ export default function Segments() {
   const [activeSegment, setActiveSegment] = useState(null)
   const [segContacts, setSegContacts] = useState([])
   const [allContacts, setAllContacts] = useState([])
+  const [contactsError, setContactsError] = useState('')
+  const [contactsLoading, setContactsLoading] = useState(true)
   const [contactSearch, setContactSearch] = useState('')
   const [addSearch, setAddSearch] = useState('')
   const [bulkSelection, setBulkSelection] = useState(new Set())
@@ -24,8 +25,35 @@ export default function Segments() {
   }
 
   useEffect(() => {
+    let cancelled = false
     loadSegments()
-    axios.get('/api/contacts', { params: { limit: 5000 } }).then((r) => setAllContacts(r.data.items))
+
+    const loadAllContacts = async () => {
+      const pageSize = 1000
+      try {
+        const firstPage = await axios.get('/api/contacts', { params: { page: 1, limit: pageSize } })
+        const loadedContacts = [...firstPage.data.items]
+        const totalPages = Math.ceil(firstPage.data.total / pageSize)
+
+        for (let page = 2; page <= totalPages; page++) {
+          const response = await axios.get('/api/contacts', { params: { page, limit: pageSize } })
+          loadedContacts.push(...response.data.items)
+        }
+
+        if (!cancelled) {
+          setAllContacts(loadedContacts)
+          setContactsLoading(false)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setContactsError(err.response?.data?.error || 'Unable to load contacts. Please try again.')
+          setContactsLoading(false)
+        }
+      }
+    }
+
+    loadAllContacts()
+    return () => { cancelled = true }
   }, [])
 
   const openSegment = (seg) => {
@@ -222,9 +250,9 @@ export default function Segments() {
                     className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 w-40"
                   />
                 </div>
-                {availableContacts.length === 0 ? (
+                {contactsError || contactsLoading || availableContacts.length === 0 ? (
                   <div className="px-5 py-6 text-center text-gray-500 text-sm">
-                    All contacts are already in this segment.
+                    {contactsError || (contactsLoading ? 'Loading contacts…' : 'All contacts are already in this segment.')}
                   </div>
                 ) : (
                   <>
