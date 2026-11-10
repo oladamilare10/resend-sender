@@ -8,19 +8,23 @@ import { parse as csvParse } from 'csv-parse/sync'
 export function parseCSV(content) {
   const delimiters = [',', ';', '\t', '|']
   let records = null
+  let bestScore = -1
 
   for (const delimiter of delimiters) {
     try {
-      const parsed = csvParse(content, {
+      const parsed = csvParse(content.replace(/^\uFEFF/, ''), {
         delimiter,
         skip_empty_lines: true,
         trim: true,
         relax_quotes: true,
         relax_column_count: true,
       })
-      if (parsed.length > 0 && parsed[0].length >= 1) {
+      const score = parsed.slice(0, 6).reduce((total, row) => {
+        return total + row.filter((cell) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((cell || '').trim())).length
+      }, 0) * 100 + (parsed[0]?.length || 0)
+      if (parsed.length > 0 && score > bestScore) {
         records = parsed
-        break
+        bestScore = score
       }
     } catch {
       // Try next delimiter
@@ -30,21 +34,23 @@ export function parseCSV(content) {
   if (!records) return []
 
   // Detect if first row is a header
-  const firstRow = records[0].map((v) => (v || '').toLowerCase())
-  const hasHeader =
-    firstRow.some((c) => ['email', 'e-mail', 'mail', 'address'].includes(c)) ||
-    firstRow.some((c) => ['name', 'firstname', 'first_name', 'full_name', 'fullname'].includes(c))
-
+  const firstRow = records[0].map((v) => (v || '').replace(/^\uFEFF/, '').trim().toLowerCase())
+  const normalizeHeader = (value) => value.replace(/[^a-z0-9]/g, '')
+  const normalizedHeaders = firstRow.map(normalizeHeader)
+  const emailHeaders = ['email', 'emailaddress', 'mail', 'address']
+  const nameHeaders = ['name', 'fullname', 'firstname', 'lastname']
+  const hasHeader = normalizedHeaders.some((col) => emailHeaders.includes(col) || nameHeaders.includes(col))
   const dataRows = hasHeader ? records.slice(1) : records
 
   // Try to find email and name column indices
   let emailIdx = 0
-  let nameIdx = -1
+  let nameIndices = []
 
   if (hasHeader) {
-    firstRow.forEach((col, i) => {
-      if (['email', 'e-mail', 'mail', 'address', 'email_address'].includes(col)) emailIdx = i
-      if (['name', 'fullname', 'full_name', 'firstname', 'first_name'].includes(col)) nameIdx = i
+    normalizedHeaders.forEach((col, i) => {
+      if (emailHeaders.includes(col)) emailIdx = i
+      if (['name', 'fullname'].includes(col)) nameIndices = [i]
+      else if (['firstname', 'lastname'].includes(col)) nameIndices.push(i)
     })
   } else {
     // Heuristic: find which column looks like emails
@@ -59,14 +65,14 @@ export function parseCSV(content) {
     const bestEmailCol = Object.entries(emailColCounts).sort((a, b) => b[1] - a[1])[0]
     if (bestEmailCol) {
       emailIdx = parseInt(bestEmailCol[0])
-      nameIdx = emailIdx === 0 ? 1 : 0
+      nameIndices = [emailIdx === 0 ? 1 : 0]
     }
   }
 
   return dataRows
     .map((row) => ({
-      email: (row[emailIdx] || '').trim(),
-      name: nameIdx >= 0 ? (row[nameIdx] || '').trim() : '',
+      email: (row[emailIdx] || '').replace(/^\uFEFF/, '').trim(),
+      name: nameIndices.map((i) => (row[i] || '').trim()).filter(Boolean).join(' '),
     }))
     .filter((r) => r.email)
 }
@@ -77,7 +83,7 @@ export function parseCSV(content) {
  */
 export function parseTXT(content) {
   const contacts = []
-  const lines = content.split(/[\r\n]+/)
+  const lines = content.replace(/^\uFEFF/, '').split(/[\r\n]+/)
 
   for (const line of lines) {
     const trimmed = line.trim()

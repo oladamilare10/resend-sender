@@ -1,7 +1,7 @@
 import express from 'express'
 import multer from 'multer'
 import { v4 as uuidv4 } from 'uuid'
-import { readStore, writeStore, insertOne, updateOne, deleteOne } from '../utils/store.js'
+import { readStore, writeStore, insertOne, deleteOne } from '../utils/store.js'
 import { validateEmail, validateEmailList } from '../utils/emailValidator.js'
 import { parseFile } from '../utils/fileParser.js'
 
@@ -69,11 +69,27 @@ router.delete('/', (req, res) => {
 })
 
 // POST /api/contacts/upload
-router.post('/upload', upload.single('file'), (req, res) => {
+router.post('/upload', (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'File exceeds the 10MB upload limit' })
+    }
+    if (error) return next(error)
+    next()
+  })
+}, (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+
+  const extension = req.file.originalname.split('.').pop()?.toLowerCase()
+  if (!['csv', 'txt'].includes(extension)) {
+    return res.status(400).json({ error: 'Only CSV and TXT files are supported' })
+  }
 
   const content = req.file.buffer.toString('utf8')
   const parsed = parseFile(req.file.originalname, content)
+  if (parsed.length === 0) {
+    return res.status(400).json({ error: 'No contacts found. Check that the file contains email addresses.' })
+  }
   const emails = parsed.map((p) => p.email)
   const validated = validateEmailList(emails)
 

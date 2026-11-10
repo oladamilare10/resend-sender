@@ -8,6 +8,7 @@ export default function Contacts() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
   const [addEmail, setAddEmail] = useState('')
   const [addName, setAddName] = useState('')
@@ -48,24 +49,28 @@ export default function Contacts() {
   }
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0]
+    const file = e.target.files?.[0] || e.dataTransfer?.files?.[0]
     if (!file) return
     setUploading(true)
     setUploadResult(null)
     const fd = new FormData()
     fd.append('file', file)
     try {
-      const r = await axios.post('/api/contacts/upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const r = await axios.post('/api/contacts/upload', fd)
       setUploadResult(r.data)
       load(1, search)
     } catch (err) {
       setUploadResult({ error: err.response?.data?.error || 'Upload failed' })
     } finally {
       setUploading(false)
-      fileRef.current.value = ''
+      if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDragging(false)
+    if (!uploading) handleFileUpload(e)
   }
 
   const handleDelete = async (id) => {
@@ -144,9 +149,14 @@ export default function Contacts() {
             Supports CSV (with email/name columns) and plain TXT (one email per line, or "Name &lt;email&gt;" format).
             Emails are validated and deduplicated automatically.
           </p>
-          <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors ${
-            uploading ? 'border-blue-700 bg-blue-900/20' : 'border-gray-700 hover:border-blue-600 hover:bg-gray-800/50'
-          }`}>
+          <label
+            onDragOver={(e) => { e.preventDefault(); if (!uploading) setIsDragging(true) }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-8 cursor-pointer transition-colors ${
+              uploading ? 'border-blue-700 bg-blue-900/20' : isDragging ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700 hover:border-blue-600 hover:bg-gray-800/50'
+            }`}
+          >
             <span className="text-3xl mb-2">📎</span>
             <span className="text-sm text-gray-400">
               {uploading ? 'Uploading…' : 'Click to upload or drag and drop'}
